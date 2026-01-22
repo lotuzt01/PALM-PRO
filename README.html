@@ -3,380 +3,347 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PalmCore ERP - Offline Edition</title>
+    <title>PalmCore ERP - Realtime Cloud</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; }
-        .glass-panel { background: white; border: 1px solid #e2e8f0; }
-        .nav-btn.active { background: #059669 !important; color: white !important; box-shadow: 0 10px 15px -3px rgba(5, 150, 105, 0.2); }
-        
-        #login-screen {
-            position: fixed;
-            inset: 0;
-            background: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
-            z-index: 99999;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
+    
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, doc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        .auth-hidden { display: none !important; }
-        
-        .modal-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.5);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 100000;
-        }
-    </style>
-</head>
-<body class="text-slate-700">
+        // Konfigurasi dari Environment
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'palmcore-erp';
 
-    <!-- Modal Konfirmasi Hapus -->
-    <div id="delete-modal" class="modal-overlay">
-        <div class="bg-white p-8 rounded-3xl max-w-sm w-full mx-4 shadow-2xl text-center">
-            <div class="text-rose-500 mb-4">
-                <i class="fas fa-exclamation-triangle text-5xl"></i>
-            </div>
-            <h3 class="text-xl font-black mb-2">Hapus Transaksi?</h3>
-            <p class="text-slate-500 text-sm mb-6">Data ini akan dihapus permanen dari penyimpanan lokal Anda.</p>
-            <div class="flex gap-3">
-                <button onclick="closeDeleteModal()" class="flex-1 py-3 bg-slate-100 font-bold rounded-xl">Batal</button>
-                <button id="confirm-delete-btn" class="flex-1 py-3 bg-rose-600 text-white font-bold rounded-xl">Hapus</button>
-            </div>
-        </div>
-    </div>
+        // State Global
+        let currentUser = null;
+        let dataStore = [];
+        let mainChart = null;
 
-    <!-- Screen Login -->
-    <div id="login-screen">
-        <div class="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl p-10 mx-4">
-            <div class="text-center mb-8">
-                <div class="inline-flex bg-emerald-100 p-4 rounded-3xl text-emerald-600 mb-4">
-                    <i class="fas fa-leaf text-4xl"></i>
-                </div>
-                <h2 class="text-3xl font-black text-slate-900 tracking-tight">PalmCore <span class="text-emerald-600">OFFLINE</span></h2>
-                <p class="text-slate-500 text-sm mt-2">Sistem RAM Sawit (Simpan di Perangkat)</p>
-            </div>
-            
-            <div class="space-y-4">
-                <input id="user-field" type="text" placeholder="Username" class="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-500">
-                <input id="pass-field" type="password" placeholder="Password" class="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-500">
-                <div id="err-msg" class="hidden bg-rose-50 text-rose-600 p-3 rounded-xl text-center text-xs font-bold uppercase">Salah! Gunakan admin/admin123</div>
-                <button onclick="attemptLogin()" class="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-xl">MASUK</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Layout Utama -->
-    <div id="app-body" class="auth-hidden">
-        <nav class="fixed left-0 top-0 h-full w-20 lg:w-64 bg-white border-r border-slate-200 z-50">
-            <div class="p-6 flex flex-col h-full">
-                <div class="flex items-center gap-3 mb-10">
-                    <div class="bg-emerald-600 p-2 rounded-xl text-white"><i class="fas fa-leaf text-xl"></i></div>
-                    <span class="font-bold text-xl hidden lg:block text-emerald-900">PalmCore<span class="text-emerald-500">ERP</span></span>
-                </div>
-                
-                <div class="space-y-2 flex-1">
-                    <button id="nav-dashboard" onclick="navTo('dashboard')" class="nav-btn active w-full flex items-center gap-4 p-3 rounded-xl text-slate-500 transition-all">
-                        <i class="fas fa-chart-pie w-5"></i><span class="font-bold hidden lg:block text-sm">Dashboard</span>
-                    </button>
-                    <button id="nav-beli" onclick="navTo('beli')" class="nav-btn w-full flex items-center gap-4 p-3 rounded-xl text-slate-500 transition-all">
-                        <i class="fas fa-balance-scale w-5"></i><span class="font-bold hidden lg:block text-sm">Beli TBS</span>
-                    </button>
-                    <button id="nav-jual" onclick="navTo('jual')" class="nav-btn w-full flex items-center gap-4 p-3 rounded-xl text-slate-500 transition-all">
-                        <i class="fas fa-truck-moving w-5"></i><span class="font-bold hidden lg:block text-sm">Jual (PKS)</span>
-                    </button>
-                    <button id="nav-biaya" onclick="navTo('biaya')" class="nav-btn w-full flex items-center gap-4 p-3 rounded-xl text-slate-500 transition-all">
-                        <i class="fas fa-money-bill-wave w-5"></i><span class="font-bold hidden lg:block text-sm">Biaya</span>
-                    </button>
-                    <button id="nav-laporan" onclick="navTo('laporan')" class="nav-btn w-full flex items-center gap-4 p-3 rounded-xl text-slate-500 transition-all">
-                        <i class="fas fa-file-invoice-dollar w-5"></i><span class="font-bold hidden lg:block text-sm">Laporan</span>
-                    </button>
-                </div>
-
-                <div class="pt-4 border-t">
-                    <p id="logged-user" class="text-[10px] font-black text-emerald-600 mb-2"></p>
-                    <button onclick="doLogout()" class="w-full flex items-center gap-4 p-3 rounded-xl text-rose-500 hover:bg-rose-50"><i class="fas fa-power-off"></i><span class="hidden lg:block">Logout</span></button>
-                </div>
-            </div>
-        </nav>
-
-        <main class="ml-20 lg:ml-64 p-8 min-h-screen">
-            <!-- Dashboard Content -->
-            <div id="page-dashboard" class="page-content">
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                    <div class="glass-panel p-6 rounded-3xl border-b-4 border-emerald-500">
-                        <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Stok Gudang (Kg)</p>
-                        <h2 id="stok-val" class="text-3xl font-black text-slate-800">0</h2>
-                    </div>
-                    <div class="glass-panel p-6 rounded-3xl border-b-4 border-blue-500">
-                        <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Jual (Kg)</p>
-                        <h2 id="jual-val" class="text-3xl font-black text-blue-600">0</h2>
-                    </div>
-                    <div class="glass-panel p-6 rounded-3xl border-b-4 border-rose-500">
-                        <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Biaya</p>
-                        <h2 id="biaya-val" class="text-2xl font-black text-rose-600">Rp 0</h2>
-                    </div>
-                    <div class="bg-slate-900 p-6 rounded-3xl text-white shadow-xl">
-                        <p class="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Estimasi Profit</p>
-                        <h2 id="profit-val" class="text-2xl font-black text-emerald-400">Rp 0</h2>
-                    </div>
-                </div>
-                <div class="glass-panel p-8 rounded-3xl h-[400px]">
-                    <canvas id="chartView"></canvas>
-                </div>
-            </div>
-
-            <!-- Page Beli -->
-            <div id="page-beli" class="page-content hidden">
-                <div class="max-w-4xl mx-auto glass-panel p-8 rounded-[2rem] border-t-8 border-emerald-500 shadow-xl">
-                    <h3 class="font-black text-2xl text-emerald-900 mb-6">Input TBS Masuk</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-10">
-                        <div class="space-y-5">
-                            <input id="b-nama" type="text" placeholder="Nama Pemasok" class="w-full p-4 bg-slate-50 border rounded-2xl font-bold">
-                            <div class="grid grid-cols-2 gap-4">
-                                <input id="b-bruto" type="number" oninput="hitungBeli()" placeholder="Brutto" class="w-full p-4 bg-slate-50 border rounded-2xl">
-                                <input id="b-tara" type="number" oninput="hitungBeli()" placeholder="Potongan Tarra" class="w-full p-4 bg-slate-50 border rounded-2xl">
-                            </div>
-                            <div class="grid grid-cols-2 gap-4">
-                                <input id="b-persen" type="number" oninput="hitungBeli()" value="3" class="w-full p-4 bg-rose-50 border-2 border-rose-100 rounded-2xl font-bold text-rose-700">
-                                <input id="b-harga" type="number" oninput="hitungBeli()" placeholder="Harga Beli" class="w-full p-4 bg-emerald-50 border-2 border-emerald-200 rounded-2xl font-bold text-emerald-700">
-                            </div>
-                        </div>
-                        <div class="bg-emerald-900 rounded-[2.5rem] p-10 text-white flex flex-col justify-center text-center">
-                            <h2 id="res-total" class="text-5xl font-black mb-4">Rp 0</h2>
-                            <p class="text-sm">Netto: <span id="res-netto">0</span> Kg</p>
-                            <button onclick="simpan('BELI')" class="w-full py-5 mt-10 bg-emerald-500 hover:bg-emerald-400 rounded-2xl font-black">SIMPAN TRANSAKSI</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Page Jual -->
-            <div id="page-jual" class="page-content hidden">
-                <div class="max-w-4xl mx-auto glass-panel p-8 rounded-[2rem] border-t-8 border-blue-500 shadow-xl">
-                    <h3 class="font-black text-2xl mb-6 text-blue-900">Input Jual ke PKS</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-10">
-                        <div class="space-y-4">
-                            <input id="j-pabrik" type="text" placeholder="Nama PKS" class="w-full p-4 bg-slate-50 border rounded-2xl font-bold">
-                            <input id="j-netto" type="number" oninput="hitungJual()" placeholder="Netto Pabrik (Kg)" class="w-full p-4 bg-slate-50 border rounded-2xl">
-                            <input id="j-harga" type="number" oninput="hitungJual()" placeholder="Harga Jual" class="w-full p-4 bg-blue-50 border-2 border-blue-200 rounded-2xl font-bold text-blue-700">
-                        </div>
-                        <div class="bg-blue-900 rounded-3xl p-8 text-white text-center">
-                            <h2 id="res-jual-total" class="text-4xl font-black">Rp 0</h2>
-                            <button onclick="simpan('JUAL')" class="w-full py-4 mt-8 bg-blue-500 hover:bg-blue-400 rounded-2xl font-black">SIMPAN PENJUALAN</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Page Biaya -->
-            <div id="page-biaya" class="page-content hidden">
-                <div class="max-w-xl mx-auto glass-panel p-8 rounded-[2rem] border-t-8 border-rose-500 shadow-xl">
-                    <h3 class="font-black text-2xl mb-6 text-rose-900">Input Biaya Operasional</h3>
-                    <div class="space-y-5">
-                        <input id="c-ket" type="text" placeholder="Keterangan Pengeluaran" class="w-full p-4 bg-slate-50 border rounded-2xl font-bold">
-                        <input id="c-nominal" type="number" placeholder="Nominal Rp" class="w-full p-4 bg-rose-50 border-2 border-rose-100 rounded-2xl font-bold text-rose-700">
-                        <button onclick="simpan('BIAYA')" class="w-full py-4 bg-rose-600 text-white font-black rounded-2xl">SIMPAN BIAYA</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Page Laporan -->
-            <div id="page-laporan" class="page-content hidden">
-                <div class="flex justify-between items-center mb-6">
-                    <h2 class="text-2xl font-black">Laporan Transaksi (Offline)</h2>
-                    <button onclick="exportExcel()" class="bg-emerald-600 text-white px-5 py-2 rounded-xl font-bold">Download Excel</button>
-                </div>
-                <div class="glass-panel rounded-3xl overflow-hidden shadow-sm">
-                    <table class="w-full text-sm text-left">
-                        <thead class="bg-slate-50 border-b">
-                            <tr>
-                                <th class="p-4 uppercase text-[10px] font-bold">Tanggal</th>
-                                <th class="p-4 uppercase text-[10px] font-bold">Keterangan</th>
-                                <th class="p-4 uppercase text-[10px] font-bold text-right">Kg</th>
-                                <th class="p-4 uppercase text-[10px] font-bold text-right">Nilai (Rp)</th>
-                                <th class="p-4 uppercase text-[10px] font-bold text-center">Aksi</th>
-                            </tr>
-                        </thead>
-                        <tbody id="table-log" class="divide-y divide-slate-100"></tbody>
-                    </table>
-                </div>
-            </div>
-        </main>
-    </div>
-
-    <script>
-        // --- LOGIKA PENYIMPANAN OFFLINE (LOCAL STORAGE) ---
-        let dataStore = JSON.parse(localStorage.getItem('sawit_erp_data')) || [];
-        let pendingDeleteIdx = null;
-
-        function saveData() {
-            localStorage.setItem('sawit_erp_data', JSON.stringify(dataStore));
-            renderAll();
-        }
-
-        // --- AUTH ---
-        function attemptLogin() {
-            const u = document.getElementById('user-field').value;
-            const p = document.getElementById('pass-field').value;
-            if ((u === 'admin' && p === 'admin123') || (u === 'operator' && p === 'sawit77')) {
-                const user = { name: u.toUpperCase() };
-                sessionStorage.setItem('offline_session', JSON.stringify(user));
-                showApp(user.name);
-            } else {
-                document.getElementById('err-msg').classList.remove('hidden');
+        // 1. Inisialisasi Auth
+        const initAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.error("Auth Error:", err);
             }
-        }
-
-        function doLogout() {
-            sessionStorage.removeItem('offline_session');
-            location.reload();
-        }
-
-        function showApp(name) {
-            document.getElementById('login-screen').classList.add('auth-hidden');
-            document.getElementById('app-body').classList.remove('auth-hidden');
-            document.getElementById('logged-user').innerText = "OFFLINE: " + name;
-            renderAll();
-            initChart();
-        }
-
-        // --- NAVIGATION ---
-        function navTo(id) {
-            document.querySelectorAll('.page-content').forEach(p => p.classList.add('hidden'));
-            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById('page-' + id).classList.remove('hidden');
-            document.getElementById('nav-' + id).classList.add('active');
-        }
-
-        // --- TRANSAKSI ---
-        function hitungBeli() {
-            const b = parseFloat(document.getElementById('b-bruto').value) || 0;
-            const t = parseFloat(document.getElementById('b-tara').value) || 0;
-            const p = parseFloat(document.getElementById('b-persen').value) || 0;
-            const h = parseFloat(document.getElementById('b-harga').value) || 0;
-            const netto = (b - t) - Math.round((b - t) * (p / 100));
-            const total = netto * h;
-            document.getElementById('res-netto').innerText = netto.toLocaleString();
-            document.getElementById('res-total').innerText = 'Rp ' + total.toLocaleString();
-            return { netto, total };
-        }
-
-        function hitungJual() {
-            const n = parseFloat(document.getElementById('j-netto').value) || 0;
-            const h = parseFloat(document.getElementById('j-harga').value) || 0;
-            document.getElementById('res-jual-total').innerText = 'Rp ' + (n*h).toLocaleString();
-            return { netto: n, total: n*h };
-        }
-
-        function simpan(tipe) {
-            let p = { tipe, ts: Date.now(), id: Date.now() };
-            if(tipe === 'BELI') {
-                const r = hitungBeli();
-                p.nama = document.getElementById('b-nama').value || 'Pemasok';
-                p.netto = r.netto; p.total = r.total;
-            } else if(tipe === 'JUAL') {
-                const r = hitungJual();
-                p.nama = document.getElementById('j-pabrik').value || 'PKS';
-                p.netto = r.netto; p.total = r.total;
-            } else {
-                p.nama = document.getElementById('c-ket').value || 'Biaya';
-                p.total = parseFloat(document.getElementById('c-nominal').value) || 0;
-                p.netto = 0;
-            }
-
-            dataStore.unshift(p);
-            saveData();
-            alert("Data tersimpan di perangkat!");
-            document.querySelectorAll('input').forEach(i => { if(i.id !== 'b-persen') i.value = '' });
-        }
-
-        // --- HAPUS ---
-        function openDeleteModal(id) {
-            pendingDeleteIdx = id;
-            document.getElementById('delete-modal').style.display = 'flex';
-        }
-
-        function closeDeleteModal() {
-            document.getElementById('delete-modal').style.display = 'none';
-        }
-
-        document.getElementById('confirm-delete-btn').onclick = () => {
-            dataStore = dataStore.filter(d => d.id !== pendingDeleteIdx);
-            saveData();
-            closeDeleteModal();
         };
 
-        // --- RENDER ---
-        function renderAll() {
-            const b = document.getElementById('table-log');
-            b.innerHTML = '';
-            
-            let s=0, j=0, exp=0, br=0, jr=0;
-            
-            dataStore.forEach(d => {
-                // Statistik
-                if(d.tipe==='BELI'){ s+=d.netto; br+=d.total; }
-                if(d.tipe==='JUAL'){ s-=d.netto; j+=d.netto; jr+=d.total; }
-                if(d.tipe==='BIAYA'){ exp+=d.total; }
+        initAuth();
 
-                // Tabel
-                const color = d.tipe === 'BELI' ? 'text-emerald-600' : (d.tipe === 'JUAL' ? 'text-blue-600' : 'text-rose-600');
-                b.insertAdjacentHTML('beforeend', `<tr class="border-b">
-                    <td class="p-4 text-xs font-bold text-slate-400">${new Date(d.ts).toLocaleDateString()}</td>
-                    <td class="p-4 font-bold"><span class="${color}">[${d.tipe}]</span> ${d.nama}</td>
-                    <td class="p-4 text-right">${d.netto ? d.netto.toLocaleString() : '-'}</td>
-                    <td class="p-4 text-right font-black">Rp ${d.total.toLocaleString()}</td>
-                    <td class="p-4 text-center">
-                        <button onclick="openDeleteModal(${d.id})" class="text-rose-400 hover:text-rose-600"><i class="fas fa-trash"></i></button>
-                    </td>
-                </tr>`);
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                document.getElementById('user-id-display').innerText = `ID: ${user.uid}`;
+                setupRealtimeListener();
+            }
+        });
+
+        // 2. Listener Realtime Firestore
+        function setupRealtimeListener() {
+            if (!currentUser) return;
+            
+            // Menggunakan path sesuai Rule 1: /artifacts/{appId}/public/data/{collectionName}
+            const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'transaksi'));
+            
+            onSnapshot(q, (snapshot) => {
+                dataStore = [];
+                snapshot.forEach((doc) => {
+                    dataStore.push({ id: doc.id, ...doc.data() });
+                });
+                
+                // Urutkan berdasarkan timestamp di memori (Rule 2)
+                dataStore.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+                
+                renderAll();
+            }, (error) => {
+                console.error("Firestore Error:", error);
+            });
+        }
+
+        // 3. Fungsi Simpan ke Cloud
+        window.simpanCloud = async (tipe) => {
+            if (!currentUser) return alert("Belum terhubung ke server!");
+
+            let payload = {
+                tipe,
+                createdAt: serverTimestamp(),
+                userId: currentUser.uid
+            };
+
+            if (tipe === 'BELI') {
+                const b = parseFloat(document.getElementById('b-bruto').value) || 0;
+                const t = parseFloat(document.getElementById('b-tara').value) || 0;
+                const p = parseFloat(document.getElementById('b-persen').value) || 0;
+                const h = parseFloat(document.getElementById('b-harga').value) || 0;
+                payload.netto = Math.round((b - t) * (1 - p/100));
+                payload.total = payload.netto * h;
+                payload.nama = document.getElementById('b-nama').value || 'Pemasok Umum';
+            } else if (tipe === 'JUAL') {
+                const n = parseFloat(document.getElementById('j-netto').value) || 0;
+                const h = parseFloat(document.getElementById('j-harga').value) || 0;
+                payload.netto = n;
+                payload.total = n * h;
+                payload.nama = document.getElementById('j-pabrik').value || 'PKS';
+            } else if (tipe === 'BIAYA') {
+                payload.total = parseFloat(document.getElementById('c-nominal').value) || 0;
+                payload.nama = document.getElementById('c-ket').value || 'Biaya Ops';
+                payload.netto = 0;
+            } else if (tipe === 'MODAL') {
+                payload.total = parseFloat(document.getElementById('m-nominal').value) || 0;
+                payload.nama = document.getElementById('m-sumber').value || 'Investasi';
+                payload.netto = 0;
+            }
+
+            try {
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transaksi'), payload);
+                showToast(`Data ${tipe} berhasil disinkronkan!`);
+                resetInputs();
+                navTo('dashboard');
+            } catch (err) {
+                alert("Gagal menyimpan: " + err.message);
+            }
+        };
+
+        window.hapusData = async (id) => {
+            if (!confirm("Hapus data ini dari cloud?")) return;
+            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transaksi', id));
+        };
+
+        // UI Logic tetap sama namun mengambil dari dataStore realtime
+        window.renderAll = () => {
+            const start = document.getElementById('filter-start').value;
+            const end = document.getElementById('filter-end').value;
+
+            const filtered = dataStore.filter(d => {
+                if (!d.createdAt) return true;
+                const dDate = new Date(d.createdAt.seconds * 1000).toISOString().split('T')[0];
+                if (start && dDate < start) return false;
+                if (end && dDate > end) return false;
+                return true;
             });
 
-            document.getElementById('stok-val').innerText = s.toLocaleString();
-            document.getElementById('jual-val').innerText = j.toLocaleString();
-            document.getElementById('biaya-val').innerText = 'Rp ' + exp.toLocaleString();
+            let br = 0, jr = 0, exp = 0, mod = 0, kg = 0;
+            const table = document.getElementById('table-log');
+            table.innerHTML = '';
+
+            filtered.forEach(d => {
+                if(d.tipe==='BELI') { br += d.total; kg += d.netto; }
+                if(d.tipe==='JUAL') { jr += d.total; kg -= d.netto; }
+                if(d.tipe==='BIAYA') { exp += d.total; }
+                if(d.tipe==='MODAL') { mod += d.total; }
+
+                const tgl = d.createdAt ? new Date(d.createdAt.seconds * 1000).toLocaleDateString('id-ID') : 'Pending...';
+
+                table.insertAdjacentHTML('beforeend', `
+                    <tr class="hover:bg-slate-50 border-b border-slate-100 font-bold text-slate-700">
+                        <td class="p-4 text-xs font-bold text-slate-400">${tgl}</td>
+                        <td class="p-4"><span class="px-3 py-1 rounded-lg text-[10px] font-black uppercase badge-${d.tipe.toLowerCase()}">${d.tipe}</span></td>
+                        <td class="p-4 text-slate-900">${d.nama}</td>
+                        <td class="p-4 text-right">${d.netto > 0 ? d.netto.toLocaleString() : '-'}</td>
+                        <td class="p-4 text-right font-black text-slate-900">Rp ${d.total.toLocaleString()}</td>
+                        <td class="p-4 text-center">
+                            <button onclick="hapusData('${d.id}')" class="text-slate-300 hover:text-rose-600"><i class="fas fa-trash-alt"></i></button>
+                        </td>
+                    </tr>
+                `);
+            });
+
+            document.getElementById('stok-val').innerText = kg.toLocaleString();
+            document.getElementById('cash-val').innerText = 'Rp ' + (mod + jr - br - exp).toLocaleString();
+            document.getElementById('modal-total-val').innerText = 'Rp ' + mod.toLocaleString();
             document.getElementById('profit-val').innerText = 'Rp ' + (jr - br - exp).toLocaleString();
-        }
+            
+            updateChart(filtered);
+        };
 
-        function exportExcel() {
-            const ws = XLSX.utils.json_to_sheet(dataStore.map(d => ({ 
-                Tanggal: new Date(d.ts).toLocaleDateString(), 
-                Tipe: d.tipe, 
-                Nama: d.nama, 
-                Netto_Kg: d.netto || 0, 
-                Total_Rp: d.total 
-            })));
-            const wb = XLSX.utils.book_new(); 
-            XLSX.utils.book_append_sheet(wb, ws, "Laporan_Sawit");
-            XLSX.writeFile(wb, "Laporan_ERP_Offline.xlsx");
-        }
-
-        function initChart() {
+        function updateChart(data) {
             const ctx = document.getElementById('chartView').getContext('2d');
-            new Chart(ctx, { 
-                type: 'bar', 
-                data: { 
-                    labels: ['Jan','Feb','Mar','Apr','Mei'], 
-                    datasets: [{label: 'Volume (Kg)', data: [12000, 19000, 15000, 22000, 28000], backgroundColor: '#10b981'}] 
+            const recent = [...data].reverse().slice(-7);
+            if(mainChart) mainChart.destroy();
+            mainChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: recent.map(r => r.createdAt ? new Date(r.createdAt.seconds * 1000).toLocaleDateString('id-ID', {day:'2-digit', month:'short'}) : '?'),
+                    datasets: [{
+                        label: 'Arus Kas (Rp)',
+                        data: recent.map(r => r.total),
+                        borderColor: '#059669',
+                        backgroundColor: 'rgba(5, 150, 105, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
                 },
                 options: { maintainAspectRatio: false }
             });
         }
+    </script>
 
-        // Auto Login if session exists
-        window.onload = () => {
-            const saved = sessionStorage.getItem('offline_session');
-            if(saved) showApp(JSON.parse(saved).name);
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; }
+        .nav-btn { color: #64748b; font-weight: 700; border-radius: 12px; }
+        .nav-btn.active { background: #047857 !important; color: white !important; }
+        .glass-panel { background: white; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .badge-beli { background: #dcfce7; color: #166534; }
+        .badge-jual { background: #dbeafe; color: #1e40af; }
+        .badge-biaya { background: #fee2e2; color: #991b1b; }
+        .badge-modal { background: #fef3c7; color: #92400e; }
+    </style>
+</head>
+<body class="text-slate-800">
+
+    <nav class="fixed left-0 top-0 h-full w-20 lg:w-64 bg-white border-r border-slate-200 z-50">
+        <div class="p-4 lg:p-6 flex flex-col h-full">
+            <div class="mb-10 flex items-center gap-3">
+                <div class="bg-emerald-600 p-2 rounded-xl text-white"><i class="fas fa-sync-alt fa-spin"></i></div>
+                <span class="font-black text-lg hidden lg:block uppercase tracking-tighter">PalmCore <span class="text-emerald-600">Cloud</span></span>
+            </div>
+            
+            <div class="space-y-2 flex-1">
+                <button onclick="navTo('dashboard')" id="nav-dashboard" class="nav-btn active w-full flex items-center gap-4 p-4"><i class="fas fa-chart-pie"></i><span class="hidden lg:block">Dashboard</span></button>
+                <button onclick="navTo('modal')" id="nav-modal" class="nav-btn w-full flex items-center gap-4 p-4"><i class="fas fa-vault"></i><span class="hidden lg:block">Modal</span></button>
+                <button onclick="navTo('beli')" id="nav-beli" class="nav-btn w-full flex items-center gap-4 p-4"><i class="fas fa-shopping-basket"></i><span class="hidden lg:block">Beli TBS</span></button>
+                <button onclick="navTo('jual')" id="nav-jual" class="nav-btn w-full flex items-center gap-4 p-4"><i class="fas fa-truck-loading"></i><span class="hidden lg:block">Jual PKS</span></button>
+                <button onclick="navTo('biaya')" id="nav-biaya" class="nav-btn w-full flex items-center gap-4 p-4"><i class="fas fa-receipt"></i><span class="hidden lg:block">Biaya Ops</span></button>
+            </div>
+
+            <div class="mt-auto p-4 bg-slate-50 rounded-2xl hidden lg:block">
+                <p class="text-[10px] font-bold text-slate-400">STATUS CLOUD</p>
+                <p id="user-id-display" class="text-[9px] font-mono text-emerald-600 truncate">Menghubungkan...</p>
+            </div>
+        </div>
+    </nav>
+
+    <main class="ml-20 lg:ml-64 p-4 lg:p-8">
+        <!-- Dashboard Content -->
+        <div id="page-dashboard" class="page-content">
+            <div class="flex flex-wrap items-center gap-4 mb-8 glass-panel p-4 rounded-2xl border-l-4 border-emerald-500">
+                <input type="date" id="filter-start" onchange="renderAll()" class="bg-slate-50 p-2 rounded-lg border font-bold text-sm">
+                <span class="font-bold text-slate-400">sampai</span>
+                <input type="date" id="filter-end" onchange="renderAll()" class="bg-slate-50 p-2 rounded-lg border font-bold text-sm">
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                <div class="glass-panel p-6 rounded-3xl border-b-4 border-emerald-500">
+                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Stok TBS (Kg)</p>
+                    <h2 id="stok-val" class="text-3xl font-black">0</h2>
+                </div>
+                <div class="glass-panel p-6 rounded-3xl border-b-4 border-blue-600">
+                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Saldo Kas</p>
+                    <h2 id="cash-val" class="text-2xl font-black text-blue-700">Rp 0</h2>
+                </div>
+                <div class="glass-panel p-6 rounded-3xl border-b-4 border-amber-500">
+                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Modal</p>
+                    <h2 id="modal-total-val" class="text-2xl font-black text-amber-700">Rp 0</h2>
+                </div>
+                <div class="bg-slate-900 p-6 rounded-3xl text-white">
+                    <p class="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-1">Estimasi Laba</p>
+                    <h2 id="profit-val" class="text-2xl font-black text-emerald-400">Rp 0</h2>
+                </div>
+            </div>
+
+            <div class="glass-panel p-6 rounded-3xl h-[400px]">
+                <canvas id="chartView"></canvas>
+            </div>
+
+            <div class="mt-8 glass-panel rounded-3xl overflow-hidden">
+                <table class="w-full text-left">
+                    <thead class="bg-slate-50 border-b">
+                        <tr class="text-[10px] font-black text-slate-400 uppercase">
+                            <th class="p-4">Waktu</th>
+                            <th class="p-4">Kategori</th>
+                            <th class="p-4">Keterangan</th>
+                            <th class="p-4 text-right">Kg</th>
+                            <th class="p-4 text-right">Nilai</th>
+                            <th class="p-4 text-center">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-log"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Forms (Simplified View for brevity, using simpanCloud) -->
+        <div id="page-beli" class="page-content hidden max-w-2xl mx-auto glass-panel p-8 rounded-[2rem]">
+            <h3 class="text-2xl font-black mb-6">Input Beli TBS</h3>
+            <div class="space-y-4">
+                <input id="b-nama" type="text" placeholder="Nama Petani" class="w-full p-4 bg-slate-50 border rounded-xl font-bold">
+                <div class="grid grid-cols-2 gap-4">
+                    <input id="b-bruto" type="number" placeholder="Bruto" class="w-full p-4 border rounded-xl font-bold">
+                    <input id="b-tara" type="number" placeholder="Tara" class="w-full p-4 border rounded-xl font-bold">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <input id="b-persen" type="number" value="3" class="w-full p-4 border rounded-xl font-bold">
+                    <input id="b-harga" type="number" placeholder="Harga /Kg" class="w-full p-4 bg-emerald-50 border-emerald-200 border rounded-xl font-bold">
+                </div>
+                <button onclick="simpanCloud('BELI')" class="w-full py-5 bg-emerald-600 text-white font-black rounded-xl text-xl shadow-lg">POSTING KE CLOUD</button>
+            </div>
+        </div>
+
+        <div id="page-jual" class="page-content hidden max-w-2xl mx-auto glass-panel p-8 rounded-[2rem]">
+            <h3 class="text-2xl font-black mb-6">Input Jual PKS</h3>
+            <div class="space-y-4">
+                <input id="j-pabrik" type="text" placeholder="Nama Pabrik" class="w-full p-4 bg-slate-50 border rounded-xl font-bold">
+                <input id="j-netto" type="number" placeholder="Netto Pabrik" class="w-full p-4 border rounded-xl font-bold">
+                <input id="j-harga" type="number" placeholder="Harga Jual" class="w-full p-4 bg-blue-50 border rounded-xl font-bold">
+                <button onclick="simpanCloud('JUAL')" class="w-full py-5 bg-blue-600 text-white font-black rounded-xl text-xl shadow-lg">POSTING KE CLOUD</button>
+            </div>
+        </div>
+
+        <div id="page-modal" class="page-content hidden max-w-xl mx-auto glass-panel p-8 rounded-[2rem]">
+            <h3 class="text-2xl font-black mb-6">Tambah Modal Tunai</h3>
+            <div class="space-y-4">
+                <input id="m-sumber" type="text" placeholder="Sumber Modal" class="w-full p-4 border rounded-xl font-bold">
+                <input id="m-nominal" type="number" placeholder="Nominal Rp" class="w-full p-4 bg-amber-50 border rounded-xl font-bold">
+                <button onclick="simpanCloud('MODAL')" class="w-full py-5 bg-amber-600 text-white font-black rounded-xl text-xl shadow-lg">DAPATKAN MODAL</button>
+            </div>
+        </div>
+
+        <div id="page-biaya" class="page-content hidden max-w-xl mx-auto glass-panel p-8 rounded-[2rem]">
+            <h3 class="text-2xl font-black mb-6">Input Biaya Operasional</h3>
+            <div class="space-y-4">
+                <input id="c-ket" type="text" placeholder="Keterangan Biaya" class="w-full p-4 border rounded-xl font-bold">
+                <input id="c-nominal" type="number" placeholder="Nominal Rp" class="w-full p-4 bg-rose-50 border rounded-xl font-bold">
+                <button onclick="simpanCloud('BIAYA')" class="w-full py-5 bg-rose-600 text-white font-black rounded-xl text-xl shadow-lg">CATAT BIAYA</button>
+            </div>
+        </div>
+    </main>
+
+    <div id="toast-container" class="fixed top-5 right-5 z-[9999]"></div>
+
+    <script>
+        // UI Helpers
+        window.navTo = (id) => {
+            document.querySelectorAll('.page-content').forEach(p => p.classList.add('hidden'));
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('page-' + id).classList.remove('hidden');
+            document.getElementById('nav-' + id).classList.add('active');
+        };
+
+        window.showToast = (msg) => {
+            const t = document.createElement('div');
+            t.className = "bg-slate-800 text-white px-6 py-4 rounded-xl shadow-2xl mb-2 animate-bounce font-bold";
+            t.innerText = msg;
+            document.getElementById('toast-container').appendChild(t);
+            setTimeout(() => t.remove(), 3000);
+        };
+
+        function resetInputs() {
+            document.querySelectorAll('input:not([type="date"])').forEach(i => { if(i.id !== 'b-persen') i.value = ''; });
         }
     </script>
 </body>
 </html>
+
