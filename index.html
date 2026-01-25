@@ -1,587 +1,551 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getFirestore, collection, doc, setDoc, getDoc, 
-  onSnapshot, query, addDoc, updateDoc, deleteDoc 
-} from 'firebase/firestore';
-import { 
-  getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged 
-} from 'firebase/auth';
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area 
-} from 'recharts';
-import { 
-  LayoutDashboard, Database, Wallet, PlusCircle, FileSpreadsheet, 
-  LogOut, Truck, TrendingUp, Menu, X, Filter, Calendar, Palmtree,
-  TrendingDown, Info, Trash2, AlertTriangle
-} from 'lucide-react';
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PalmCore ERP - Finance & RAM Sawit</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f1f5f9; }
+        .nav-btn.active { background: #059669 !important; color: white !important; }
+        .card-shadow { box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); }
+        @media print { .no-print { display: none !important; } #print-area { display: block !important; } }
+    </style>
+</head>
+<body class="text-slate-800">
 
-// Firebase Configuration (Provided by environment)
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'adhi-group-erp-v1';
-
-const App = () => {
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [user, setUser] = useState(null);
-  const [transactions, setTransactions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  
-  // Modal State untuk Hapus
-  const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: null, entity: '' });
-
-  // Filters
-  const [filterDate, setFilterDate] = useState('');
-  const [filterType, setFilterType] = useState('ALL');
-
-  const [form, setForm] = useState({
-    type: 'IN',
-    flow: '+', 
-    entity: '',
-    driver: '',
-    plate: '',
-    bruto: '',
-    tara: '',
-    pot: '3.0',
-    price: '',
-    note: '',
-    category: 'TBS'
-  });
-
-  // --- AUTHENTICATION ---
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error("Auth Error:", error);
-      }
-    };
-    initAuth();
-
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // --- DATA FETCHING ---
-  useEffect(() => {
-    if (!user) return;
-
-    setLoading(true);
-    const q = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      const sortedData = data.sort((a, b) => b.timestamp - a.timestamp);
-      setTransactions(sortedData);
-      setLoading(false);
-    }, (error) => {
-      console.error("Firestore Error:", error);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
-
-  // --- CALCULATION LOGIC ---
-  const stats = useMemo(() => {
-    let totalIn = 0, totalOut = 0, totalCost = 0, kgIn = 0, kgOut = 0, kgLoss = 0, rupiahLoss = 0;
-    let totalDebt = 0, totalCapital = 0;
-
-    transactions.forEach(t => {
-      const val = parseFloat(t.total) || 0;
-      const kg = parseFloat(t.netto) || 0;
-      
-      if (t.type === 'IN') { totalIn += val; kgIn += kg; }
-      else if (t.type === 'OUT') { totalOut += val; kgOut += kg; }
-      else if (t.type === 'COST') { totalCost += val; }
-      else if (t.type === 'LOSSES') { 
-        kgLoss += kg; 
-        rupiahLoss += val; 
-      }
-      else if (t.type === 'DEBT') {
-        totalDebt += (t.flow === '+' ? val : -val);
-      }
-      else if (t.type === 'CAPITAL') {
-        totalCapital += (t.flow === '+' ? val : -val);
-      }
-    });
-
-    const cashBalance = (totalCapital + totalDebt + totalOut) - (totalIn + totalCost);
-    const profit = totalOut - totalIn - totalCost - rupiahLoss;
-    
-    return { 
-      totalIn, totalOut, totalCost, totalDebt, totalCapital,
-      profit, 
-      stock: kgIn - kgOut - kgLoss,
-      kgLoss,
-      rupiahLoss,
-      cash: cashBalance
-    };
-  }, [transactions]);
-
-  const filteredTransactions = useMemo(() => {
-    return transactions.filter(t => {
-      const matchDate = filterDate ? t.dateIso === filterDate : true;
-      const matchType = filterType === 'ALL' ? true : t.type === filterType;
-      return matchDate && matchType;
-    });
-  }, [transactions, filterDate, filterType]);
-
-  // --- ACTIONS ---
-  const handleSave = async (e) => {
-    e.preventDefault();
-    if (!user) return;
-
-    const brutoVal = parseFloat(form.bruto) || 0;
-    const taraVal = parseFloat(form.tara) || 0;
-    const potVal = parseFloat(form.pot) || 0;
-    const priceVal = parseFloat(form.price) || 0;
-    
-    let netto = 0;
-    let total = 0;
-
-    if (form.type === 'COST' || form.type === 'DEBT' || form.type === 'CAPITAL') {
-      total = priceVal;
-      netto = 0;
-    } else if (form.type === 'LOSSES') {
-      netto = brutoVal; 
-      total = netto * priceVal; 
-    } else {
-      netto = form.type === 'IN' 
-        ? (brutoVal - taraVal) * (1 - (potVal / 100)) 
-        : brutoVal;
-      total = netto * priceVal;
-    }
-
-    const now = new Date();
-    const newTransaction = { 
-      ...form, 
-      netto: parseFloat(netto.toFixed(2)), 
-      total: Math.round(total),
-      timestamp: now.getTime(),
-      dateDisplay: now.toLocaleDateString('id-ID'),
-      dateIso: now.toISOString().split('T')[0],
-      createdBy: user.uid
-    };
-    
-    try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), newTransaction);
-      setForm({ ...form, entity: '', driver: '', plate: '', bruto: '', tara: '', price: '', note: '' });
-      setActiveTab('database');
-    } catch (err) {
-      console.error("Save error:", err);
-    }
-  };
-
-  const confirmDelete = (t) => {
-    setDeleteModal({ isOpen: true, id: t.id, entity: t.entity });
-  };
-
-  const handleDelete = async () => {
-    if (!user || !deleteModal.id) return;
-    try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', deleteModal.id));
-      setDeleteModal({ isOpen: false, id: null, entity: '' });
-    } catch (err) {
-      console.error("Delete error:", err);
-    }
-  };
-
-  const NavItem = ({ id, icon: Icon, label }) => (
-    <button
-      onClick={() => { setActiveTab(id); setIsSidebarOpen(false); }}
-      className={`flex items-center gap-3 w-full px-4 py-4 rounded-xl transition-all ${
-        activeTab === id 
-        ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30' 
-        : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-      }`}
-    >
-      <Icon size={20} />
-      <span className="font-bold text-xs tracking-widest">{label}</span>
-    </button>
-  );
-
-  return (
-    <div className="flex min-h-screen bg-[#0f172a] text-slate-200 font-sans">
-      
-      {/* MODAL HAPUS (CUSTOM UI) */}
-      {deleteModal.isOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
-          <div className="bg-[#1e293b] border border-slate-700 w-full max-w-sm rounded-3xl p-8 shadow-2xl animate-in zoom-in duration-200">
-            <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-6">
-              <AlertTriangle size={32} />
+    <!-- Sidebar Navigation -->
+    <nav class="fixed left-0 top-0 h-full w-20 lg:w-64 bg-white border-r border-slate-200 z-50 no-print">
+        <div class="p-6 flex flex-col h-full">
+            <div class="flex items-center gap-3 mb-10">
+                <div class="bg-emerald-600 p-2 rounded-xl text-white"><i class="fas fa-chart-line text-xl"></i></div>
+                <span class="font-bold text-xl hidden lg:block text-emerald-900">Palm<span class="text-emerald-500">Finance</span></span>
             </div>
-            <h3 className="text-center text-xl font-black text-white mb-2">HAPUS DATA?</h3>
-            <p className="text-center text-slate-400 text-sm leading-relaxed mb-8">
-              Transaksi <span className="text-white font-bold italic">"{deleteModal.entity}"</span> akan dihapus permanen dari cloud server.
-            </p>
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setDeleteModal({ isOpen: false, id: null, entity: '' })}
-                className="flex-1 py-4 bg-slate-800 text-slate-300 font-bold rounded-2xl hover:bg-slate-700 transition-colors"
-              >
-                BATAL
-              </button>
-              <button 
-                onClick={handleDelete}
-                className="flex-1 py-4 bg-rose-600 text-white font-bold rounded-2xl hover:bg-rose-500 transition-colors shadow-lg shadow-rose-600/20"
-              >
-                YA, HAPUS
-              </button>
+            <div class="space-y-1 flex-1 overflow-y-auto">
+                <button onclick="navTo('dashboard')" id="nav-dashboard" class="nav-btn active w-full flex items-center gap-4 p-3 rounded-xl text-slate-500 hover:bg-slate-50 transition-all">
+                    <i class="fas fa-th-large w-5"></i><span class="font-bold hidden lg:block text-sm">Dashboard</span>
+                </button>
+                <button onclick="navTo('beli')" id="nav-beli" class="nav-btn w-full flex items-center gap-4 p-3 rounded-xl text-slate-500 hover:bg-slate-50 transition-all">
+                    <i class="fas fa-shopping-cart w-5"></i><span class="font-bold hidden lg:block text-sm">Pembelian TBS</span>
+                </button>
+                <button onclick="navTo('jual')" id="nav-jual" class="nav-btn w-full flex items-center gap-4 p-3 rounded-xl text-slate-500 hover:bg-slate-50 transition-all">
+                    <i class="fas fa-truck-loading w-5"></i><span class="font-bold hidden lg:block text-sm">Klaim PKS</span>
+                </button>
+                <button onclick="navTo('biaya')" id="nav-biaya" class="nav-btn w-full flex items-center gap-4 p-3 rounded-xl text-slate-500 hover:bg-slate-50 transition-all">
+                    <i class="fas fa-wallet w-5"></i><span class="font-bold hidden lg:block text-sm">Biaya & Modal</span>
+                </button>
+                <div class="pt-4 pb-2 text-[10px] font-black text-slate-400 uppercase tracking-widest hidden lg:block text-center lg:text-left">Laporan Keuangan</div>
+                <button onclick="navTo('laba-rugi')" id="nav-laba-rugi" class="nav-btn w-full flex items-center gap-4 p-3 rounded-xl text-slate-500 hover:bg-slate-50 transition-all">
+                    <i class="fas fa-file-invoice-dollar w-5"></i><span class="font-bold hidden lg:block text-sm">Laba / Rugi</span>
+                </button>
+                <button onclick="navTo('neraca')" id="nav-neraca" class="nav-btn w-full flex items-center gap-4 p-3 rounded-xl text-slate-500 hover:bg-slate-50 transition-all">
+                    <i class="fas fa-balance-scale w-5"></i><span class="font-bold hidden lg:block text-sm">Neraca</span>
+                </button>
+                <button onclick="navTo('modal')" id="nav-modal" class="nav-btn w-full flex items-center gap-4 p-3 rounded-xl text-slate-500 hover:bg-slate-50 transition-all">
+                    <i class="fas fa-coins w-5"></i><span class="font-bold hidden lg:block text-sm">Perubahan Modal</span>
+                </button>
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* Mobile Top Bar */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-[#1e293b] border-b border-slate-800 z-50 flex items-center justify-between px-6">
-        <div className="flex items-center gap-2">
-           <Palmtree className="text-emerald-500" size={24} />
-           <span className="font-black text-white italic tracking-tighter uppercase text-sm">ADHI GROUP</span>
-        </div>
-        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 bg-slate-800 rounded-lg text-emerald-500">
-          {isSidebarOpen ? <X size={24}/> : <Menu size={24}/>}
-        </button>
-      </div>
-
-      {/* Sidebar */}
-      <aside className={`fixed lg:sticky top-0 left-0 h-screen w-72 bg-[#1e293b] border-r border-slate-800 p-6 flex flex-col z-[60] transition-transform duration-300 lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="hidden lg:flex items-center gap-3 mb-12 px-2">
-          <div className="bg-emerald-500 p-2 rounded-lg"><Palmtree className="text-white" size={28} /></div>
-          <div>
-            <h1 className="text-xl font-black text-white tracking-tighter leading-none italic uppercase">ADHI GROUP</h1>
-            <p className="text-[8px] font-bold text-emerald-500 tracking-[0.3em] mt-1">SAWINDO PRATAMA</p>
-          </div>
-        </div>
-
-        <nav className="space-y-2 flex-1 mt-12 lg:mt-0">
-          <NavItem id="dashboard" icon={LayoutDashboard} label="DASHBOARD" />
-          <NavItem id="input" icon={PlusCircle} label="INPUT DATA" />
-          <NavItem id="database" icon={Database} label="LEDGER" />
-          <NavItem id="financial" icon={Wallet} label="FINANCIAL" />
-        </nav>
-
-        <div className="mt-auto pt-6 border-t border-slate-800/50">
-          <div className="flex items-center gap-3 mb-4 px-2 text-xs">
-            <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-emerald-400">
-              {user ? 'AG' : '...'}
+            <!-- Export Button -->
+            <div class="mt-auto pt-6 border-t border-slate-100">
+                <button onclick="exportFullReport()" class="w-full bg-emerald-100 hover:bg-emerald-200 text-emerald-700 font-bold p-3 rounded-xl flex items-center justify-center gap-2 transition-all">
+                    <i class="fas fa-file-excel"></i> <span class="hidden lg:block">Export Excel</span>
+                </button>
             </div>
-            <div className="overflow-hidden">
-              <p className="font-black text-slate-500 uppercase truncate">Operator</p>
-              <p className="text-[10px] text-slate-400 truncate font-mono">{user?.uid || 'Connecting...'}</p>
-            </div>
-          </div>
         </div>
-      </aside>
+    </nav>
 
-      {/* Main Content */}
-      <main className="flex-1 p-4 lg:p-10 mt-16 lg:mt-0 overflow-x-hidden">
+    <main class="ml-20 lg:ml-64 p-4 lg:p-8 no-print">
         
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-          <div>
-            <h2 className="text-2xl lg:text-3xl font-bold text-white uppercase tracking-tight">
-              {activeTab === 'financial' ? 'LAPORAN KEUANGAN' : 
-               activeTab === 'database' ? 'JURNAL TRANSAKSI' : 
-               activeTab === 'input' ? 'ENTRY BARU' : 'DASHBOARD'}
-            </h2>
-            <p className="text-emerald-500 text-[10px] font-black uppercase tracking-[.2em] mt-1">Sistem ERP Sawit Terintegrasi</p>
-          </div>
+        <!-- DASHBOARD SECTION -->
+        <div id="page-dashboard" class="page-content text-center lg:text-left">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between mb-8 gap-4">
+                <div>
+                    <h1 class="text-3xl font-black text-slate-900">Dashboard Keuangan</h1>
+                    <p class="text-slate-500">Monitor arus kas dan stok RAM secara real-time.</p>
+                </div>
+                <div class="flex gap-2 justify-center lg:justify-end">
+                    <div class="bg-white p-4 rounded-2xl border border-slate-200 text-right min-w-[200px]">
+                        <p class="text-[10px] font-black text-slate-400 uppercase">Saldo Kas Saat Ini</p>
+                        <h3 id="dash-cash" class="text-xl font-black text-emerald-600">Rp 0</h3>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                <div class="bg-white p-6 rounded-3xl border border-slate-200 card-shadow">
+                    <div class="flex items-center gap-3 mb-4 text-emerald-600"><i class="fas fa-warehouse text-xl"></i><span class="text-[10px] font-black uppercase">Stok di RAM</span></div>
+                    <h2 id="dash-stok" class="text-3xl font-black">0 <span class="text-sm font-normal text-slate-400">Kg</span></h2>
+                </div>
+                <div class="bg-white p-6 rounded-3xl border border-slate-200 card-shadow">
+                    <div class="flex items-center gap-3 mb-4 text-blue-600"><i class="fas fa-truck-moving text-xl"></i><span class="text-[10px] font-black uppercase">Stok OTW PKS</span></div>
+                    <h2 id="dash-otw" class="text-3xl font-black">0 <span class="text-sm font-normal text-slate-400">Kg</span></h2>
+                </div>
+                <div class="bg-white p-6 rounded-3xl border border-slate-200 card-shadow">
+                    <div class="flex items-center gap-3 mb-4 text-amber-600"><i class="fas fa-compress-arrows-alt text-xl"></i><span class="text-[10px] font-black uppercase">Total Susut</span></div>
+                    <h2 id="dash-susut" class="text-3xl font-black">0 <span class="text-sm font-normal text-slate-400">Kg</span></h2>
+                </div>
+                <div class="bg-slate-900 p-6 rounded-3xl border border-slate-800 card-shadow text-white">
+                    <div class="flex items-center gap-3 mb-4 text-emerald-400"><i class="fas fa-funnel-dollar text-xl"></i><span class="text-[10px] font-black uppercase">Laba Berjalan</span></div>
+                    <h2 id="dash-profit" class="text-2xl font-black">Rp 0</h2>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div class="bg-white p-8 rounded-[2.5rem] border border-slate-200 h-[400px]">
+                    <h4 class="font-black mb-6 flex items-center gap-2"><i class="fas fa-chart-bar text-emerald-500"></i> Tren Pembelian 7 Hari</h4>
+                    <canvas id="chartBeli"></canvas>
+                </div>
+                <div class="bg-white p-8 rounded-[2.5rem] border border-slate-200 overflow-hidden overflow-y-auto max-h-[400px]">
+                    <h4 class="font-black mb-6 flex items-center gap-2"><i class="fas fa-history text-blue-500"></i> Transaksi Terakhir</h4>
+                    <div id="recent-logs" class="space-y-4 text-left"></div>
+                </div>
+            </div>
         </div>
 
-        {loading ? (
-          <div className="h-[60vh] flex flex-col items-center justify-center gap-4">
-            <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-            <p className="text-slate-500 font-bold text-[10px] tracking-widest animate-pulse">SINKRONISASI CLOUD...</p>
-          </div>
-        ) : (
-          <>
-            {activeTab === 'dashboard' && (
-              <div className="space-y-6">
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  {[
-                    { label: 'CASH ON HAND', val: stats.cash, color: 'emerald', icon: Wallet },
-                    { label: 'RUGI SUSUT (IDR)', val: stats.rupiahLoss, color: 'rose', icon: TrendingDown },
-                    { label: 'STOK BERSIH (KG)', val: stats.stock, color: 'blue', icon: Truck },
-                    { label: 'LABA BERJALAN', val: stats.profit, color: 'emerald', icon: TrendingUp },
-                  ].map((item, i) => (
-                    <div key={i} className="bg-[#1e293b] p-5 rounded-3xl border border-slate-800 shadow-xl">
-                      <div className={`p-2 bg-${item.color}-500/10 text-${item.color}-500 rounded-lg w-fit mb-4`}>
-                        <item.icon size={18} />
-                      </div>
-                      <h4 className="text-slate-500 text-[9px] font-black tracking-widest uppercase mb-1">{item.label}</h4>
-                      <p className="text-lg lg:text-2xl font-black text-white tracking-tight leading-none">
-                        {item.label.includes('(KG)') ? item.val.toLocaleString() : `Rp ${item.val.toLocaleString()}`}
-                      </p>
+        <!-- PAGE PEMBELIAN -->
+        <div id="page-beli" class="page-content hidden">
+            <div class="max-w-4xl mx-auto bg-white p-10 rounded-[3rem] shadow-2xl border-t-[12px] border-emerald-500">
+                <h2 class="text-3xl font-black text-slate-900 mb-8">Penerimaan TBS</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div class="space-y-4">
+                        <input id="in-beli-nama" type="text" placeholder="Nama Pemasok" class="w-full p-4 bg-slate-50 border rounded-2xl font-bold">
+                        <div class="grid grid-cols-2 gap-4">
+                            <input id="in-beli-bruto" type="number" oninput="calcBeli()" placeholder="Brutto (Kg)" class="w-full p-4 border rounded-2xl font-black">
+                            <input id="in-beli-tara" type="number" oninput="calcBeli()" placeholder="Tarra (Kg)" class="w-full p-4 border rounded-2xl font-black">
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <input id="in-beli-pot" type="number" oninput="calcBeli()" value="3" class="w-full p-4 bg-rose-50 border-rose-100 rounded-2xl font-black text-rose-600">
+                            <input id="in-beli-harga" type="number" oninput="calcBeli()" placeholder="Harga Beli" class="w-full p-4 bg-emerald-50 border-emerald-200 rounded-2xl font-black text-emerald-700">
+                        </div>
+                        <input id="in-beli-date" type="date" class="w-full p-4 border rounded-2xl font-bold">
                     </div>
-                  ))}
-                </div>
-
-                <div className="bg-[#1e293b] p-6 lg:p-8 rounded-[2.5rem] border border-slate-800">
-                  <h3 className="font-black text-white uppercase tracking-widest text-[10px] opacity-70 mb-8">Visualisasi Arus Barang (Kg)</h3>
-                  <div className="h-64 lg:h-96 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={transactions.slice(0, 10).reverse()}>
-                        <defs>
-                          <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} opacity={0.3} />
-                        <XAxis dataKey="dateDisplay" stroke="#64748b" fontSize={10} axisLine={false} tickLine={false} dy={10} />
-                        <YAxis stroke="#64748b" fontSize={10} axisLine={false} tickLine={false} />
-                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '16px', fontSize: '12px', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }} />
-                        <Area type="monotone" dataKey="netto" stroke="#10b981" fill="url(#colorVal)" strokeWidth={4} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'input' && (
-              <div className="max-w-4xl mx-auto">
-                <form onSubmit={handleSave} className="bg-[#1e293b] p-8 lg:p-12 rounded-[3rem] border border-slate-800 shadow-2xl space-y-10">
-                  <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">
-                    {[
-                      { id: 'IN', label: 'BELI' },
-                      { id: 'OUT', label: 'JUAL' },
-                      { id: 'COST', label: 'BIAYA' },
-                      { id: 'LOSSES', label: 'SUSUT' },
-                      { id: 'DEBT', label: 'HUTANG' },
-                      { id: 'CAPITAL', label: 'MODAL' }
-                    ].map(t => (
-                      <button 
-                        key={t.id} 
-                        type="button" 
-                        onClick={() => setForm({...form, type: t.id})} 
-                        className={`py-4 rounded-2xl border-2 font-black text-[10px] tracking-widest transition-all ${form.type === t.id ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : 'border-slate-800 text-slate-700 hover:border-slate-700'}`}
-                      >
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {/* Fields vary based on type */}
-                    {form.type === 'LOSSES' ? (
-                      <>
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Berat Susut (Kg)</label>
-                          <input type="number" value={form.bruto} onChange={e => setForm({...form, bruto: e.target.value})} className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-5 py-4 outline-none focus:border-rose-500 text-rose-400 font-black text-xl" required />
+                    <div class="bg-emerald-900 rounded-[2.5rem] p-8 text-white flex flex-col justify-between">
+                        <div>
+                            <p class="text-[10px] font-black opacity-50 uppercase mb-4">Ringkasan Pembayaran</p>
+                            <div class="flex justify-between border-b border-emerald-800 pb-2 mb-2"><span>Netto</span><span id="res-beli-netto" class="font-bold">0 Kg</span></div>
+                            <div class="flex justify-between"><span>Potongan</span><span id="res-beli-potkg" class="text-rose-400">0 Kg</span></div>
                         </div>
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Harga Beli Rata-rata (Rp/Kg)</label>
-                          <input type="number" value={form.price} onChange={e => setForm({...form, price: e.target.value})} className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-5 py-4 outline-none focus:border-rose-500 text-emerald-400 font-black text-xl" required />
+                        <div class="text-center mt-10">
+                            <h2 id="res-beli-total" class="text-4xl font-black mb-6">Rp 0</h2>
+                            <button onclick="saveTx('BELI')" class="w-full py-5 bg-emerald-500 hover:bg-emerald-400 rounded-2xl font-black transition-all shadow-lg">SIMPAN & BAYAR</button>
                         </div>
-                        <div className="space-y-3 md:col-span-2">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Keterangan / Alasan Susut</label>
-                          <input type="text" value={form.entity} onChange={e => setForm({...form, entity: e.target.value})} className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-5 py-4 outline-none focus:border-rose-500" placeholder="Susut timbangan PKS / Bongkar muat" required />
-                        </div>
-                      </>
-                    ) : form.type === 'COST' || form.type === 'DEBT' || form.type === 'CAPITAL' ? (
-                      <>
-                        <div className="space-y-3 md:col-span-2">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Deskripsi Transaksi</label>
-                          <input type="text" value={form.entity} onChange={e => setForm({...form, entity: e.target.value})} className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500 uppercase font-bold" required />
-                        </div>
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Nominal Rupiah (IDR)</label>
-                          <input type="number" value={form.price} onChange={e => setForm({...form, price: e.target.value})} className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500 text-emerald-400 font-black text-xl" required />
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Mitra / PKS</label>
-                          <input type="text" value={form.entity} onChange={e => setForm({...form, entity: e.target.value})} className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500 uppercase font-bold" required />
-                        </div>
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">No. Plat Kendaraan</label>
-                          <input type="text" value={form.plate} onChange={e => setForm({...form, plate: e.target.value})} className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500 uppercase" />
-                        </div>
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Bruto (Kg)</label>
-                          <input type="number" value={form.bruto} onChange={e => setForm({...form, bruto: e.target.value})} className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500" required />
-                        </div>
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Tara (Kg)</label>
-                          <input type="number" value={form.tara} onChange={e => setForm({...form, tara: e.target.value})} className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500" />
-                        </div>
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Harga Per Kg (IDR)</label>
-                          <input type="number" value={form.price} onChange={e => setForm({...form, price: e.target.value})} className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500 text-emerald-400 font-black text-xl" required />
-                        </div>
-                        <div className="space-y-3">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Potongan (%)</label>
-                          <input type="number" step="0.1" value={form.pot} onChange={e => setForm({...form, pot: e.target.value})} className="w-full bg-[#0f172a] border border-slate-700 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500" />
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  <button type="submit" className={`w-full py-6 rounded-3xl font-black text-sm tracking-[0.4em] text-white shadow-2xl active:scale-[0.98] transition-all ${form.type === 'LOSSES' ? 'bg-rose-600 shadow-rose-600/20' : 'bg-emerald-600 shadow-emerald-600/20'}`}>
-                    UPLOAD DATA KE CLOUD
-                  </button>
-                </form>
-              </div>
-            )}
-
-            {activeTab === 'database' && (
-              <div className="space-y-6">
-                <div className="bg-[#1e293b] p-5 rounded-[2rem] border border-slate-800 flex flex-wrap gap-4 items-center shadow-lg">
-                   <div className="flex items-center gap-3 bg-[#0f172a] px-5 py-3 rounded-2xl border border-slate-700 text-xs font-bold">
-                      <Calendar size={16} className="text-emerald-500" />
-                      <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} className="bg-transparent outline-none text-slate-200" />
-                   </div>
-                   <div className="flex items-center gap-3 bg-[#0f172a] px-5 py-3 rounded-2xl border border-slate-700 text-xs font-bold">
-                      <Filter size={16} className="text-emerald-500" />
-                      <select value={filterType} onChange={e => setFilterType(e.target.value)} className="bg-transparent outline-none text-slate-200">
-                         <option value="ALL">SEMUA TIPE</option>
-                         <option value="IN">BELI (IN)</option>
-                         <option value="OUT">JUAL (OUT)</option>
-                         <option value="COST">BIAYA OPERASIONAL</option>
-                         <option value="LOSSES">SUSUT BARANG</option>
-                      </select>
-                   </div>
-                   <div className="ml-auto text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
-                      Total: {filteredTransactions.length} baris data
-                   </div>
-                </div>
-
-                <div className="bg-[#1e293b] rounded-[3rem] border border-slate-800 overflow-hidden shadow-2xl">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead className="bg-[#0f172a] text-slate-500 text-[10px] uppercase font-black tracking-widest border-b border-slate-800">
-                        <tr>
-                          <th className="px-8 py-6">Tanggal</th>
-                          <th className="px-8 py-6">Keterangan</th>
-                          <th className="px-8 py-6 text-right">Netto (Kg)</th>
-                          <th className="px-8 py-6 text-right">Total Nominal</th>
-                          <th className="px-8 py-6 text-center">Menu</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/50">
-                        {filteredTransactions.map((t) => (
-                          <tr key={t.id} className="hover:bg-slate-800/30 transition-all group">
-                            <td className="px-8 py-6">
-                               <div className="text-[11px] text-slate-400 font-bold">{t.dateDisplay}</div>
-                               <div className={`mt-1 inline-block px-2 py-0.5 rounded text-[8px] font-black border ${
-                                  t.type === 'IN' ? 'border-emerald-500/50 text-emerald-500' : 
-                                  t.type === 'OUT' ? 'border-blue-500/50 text-blue-500' : 
-                                  t.type === 'COST' ? 'border-rose-500/50 text-rose-500' :
-                                  'border-orange-500/50 text-orange-500'
-                               }`}>
-                                 {t.type}
-                               </div>
-                            </td>
-                            <td className="px-8 py-6">
-                               <div className="font-bold text-white text-[15px] uppercase tracking-tight">{t.entity}</div>
-                               <div className="text-[10px] text-slate-500 font-black tracking-wider mt-1 uppercase opacity-70">
-                                 {t.plate || t.note || 'Transaksi Umum'}
-                               </div>
-                            </td>
-                            <td className="px-8 py-6 text-right font-bold text-slate-300">
-                              {t.netto > 0 ? t.netto.toLocaleString() : '-'}
-                            </td>
-                            <td className={`px-8 py-6 text-right font-black text-[15px] ${t.type === 'OUT' || (t.type === 'CAPITAL' && t.flow === '+') ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {t.type === 'LOSSES' ? `-Rp ${t.total?.toLocaleString()}` : `Rp ${t.total?.toLocaleString()}`}
-                            </td>
-                            <td className="px-8 py-6 text-center">
-                              {/* TOMBOL HAPUS */}
-                              <button 
-                                onClick={() => confirmDelete(t)} 
-                                className="p-3 text-slate-600 hover:text-rose-500 hover:bg-rose-500/10 rounded-2xl transition-all active:scale-90"
-                                title="Hapus Transaksi"
-                              >
-                                <Trash2 size={20} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {filteredTransactions.length === 0 && (
-                    <div className="p-20 text-center">
-                       <Database className="mx-auto text-slate-800 mb-4" size={48} />
-                       <p className="text-slate-600 font-bold uppercase text-xs tracking-widest">Tidak ada data ditemukan</p>
                     </div>
-                  )}
                 </div>
-              </div>
-            )}
+            </div>
+        </div>
 
-            {activeTab === 'financial' && (
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-10">
-                  <div className="bg-[#1e293b] p-10 rounded-[3rem] border border-emerald-500/10 shadow-2xl relative overflow-hidden group">
-                     <div className="absolute top-0 right-0 p-10 opacity-[0.03] group-hover:scale-110 transition-transform">
-                       <Palmtree size={180} className="text-emerald-500" />
-                     </div>
-                     <div className="flex items-center gap-4 mb-12">
-                        <div className="p-3 bg-emerald-500/10 text-emerald-500 rounded-2xl"><TrendingUp size={20} /></div>
-                        <h3 className="text-emerald-500 font-black text-xs tracking-[.4em] uppercase">NERACA AKTIVA</h3>
-                     </div>
-                     <div className="space-y-8 relative z-10">
-                        <div className="flex justify-between items-end border-b border-slate-800/50 pb-6">
-                           <div><p className="text-white font-bold text-lg">Saldo Kas</p><p className="text-[10px] text-slate-600 font-black uppercase">Liquid Asset</p></div>
-                           <span className="text-2xl font-black text-white">Rp {stats.cash.toLocaleString()}</span>
+        <!-- PAGE KLAIM PKS -->
+        <div id="page-jual" class="page-content hidden">
+            <div class="max-w-4xl mx-auto bg-white p-10 rounded-[3rem] shadow-2xl border-t-[12px] border-blue-500">
+                <h2 class="text-3xl font-black text-slate-900 mb-8">Klaim Hasil Pabrik</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div class="space-y-4">
+                        <select id="in-jual-ref" class="w-full p-4 bg-slate-50 border rounded-2xl font-bold">
+                            <option value="">-- Pilih DO Belum Diklaim --</option>
+                        </select>
+                        <div class="grid grid-cols-2 gap-4">
+                            <input id="in-jual-bruto" type="number" oninput="calcJual()" placeholder="Brutto PKS" class="w-full p-4 border rounded-2xl font-black text-blue-600">
+                            <input id="in-jual-tara" type="number" oninput="calcJual()" placeholder="Tarra PKS" class="w-full p-4 border rounded-2xl font-black">
                         </div>
-                        <div className="flex justify-between items-end border-b border-slate-800/50 pb-6">
-                           <div><p className="text-white font-bold text-lg">Estimasi Aset Stok</p><p className="text-[10px] text-slate-600 font-black uppercase">{stats.stock.toLocaleString()} Kg Sawit</p></div>
-                           <span className="text-2xl font-black text-white">Rp {(stats.stock * 2200).toLocaleString()}</span>
+                        <div class="grid grid-cols-2 gap-4">
+                            <input id="in-jual-sortasi" type="number" oninput="calcJual()" placeholder="Sortasi %" class="w-full p-4 border rounded-2xl font-black">
+                            <input id="in-jual-harga" type="number" oninput="calcJual()" placeholder="Harga PKS" class="w-full p-4 border rounded-2xl font-black text-emerald-600">
                         </div>
-                        <div className="pt-8 flex justify-between items-center text-emerald-400">
-                           <span className="font-black text-xs tracking-[0.3em] uppercase opacity-70">Total Nilai Aset</span>
-                           <span className="text-4xl font-black tracking-tighter italic">Rp {(stats.cash + (stats.stock * 2200)).toLocaleString()}</span>
+                        <input id="in-jual-date" type="date" class="w-full p-4 border rounded-2xl font-bold">
+                    </div>
+                    <div class="bg-blue-900 rounded-[2.5rem] p-8 text-white flex flex-col justify-between text-center">
+                        <div>
+                            <p class="text-[10px] font-black opacity-50 uppercase mb-4">Total Klaim Piutang</p>
+                            <h2 id="res-jual-total" class="text-4xl font-black mb-2">Rp 0</h2>
+                            <p id="res-jual-netto" class="text-blue-300 font-bold">Netto PKS: 0 Kg</p>
                         </div>
-                     </div>
-                  </div>
+                        <button onclick="saveTx('JUAL')" class="w-full py-5 bg-blue-500 hover:bg-blue-400 rounded-2xl font-black mt-8">SIMPAN KLAIM</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-                  <div className="bg-[#1e293b] p-10 rounded-[3rem] border border-indigo-500/10 shadow-2xl relative overflow-hidden group">
-                     <div className="absolute top-0 right-0 p-10 opacity-[0.03] group-hover:scale-110 transition-transform">
-                       <Info size={180} className="text-indigo-500" />
-                     </div>
-                     <div className="flex items-center gap-4 mb-12">
-                        <div className="p-3 bg-indigo-500/10 text-indigo-500 rounded-2xl"><Info size={20} /></div>
-                        <h3 className="text-indigo-500 font-black text-xs tracking-[.4em] uppercase">PASIVA & LABA</h3>
-                     </div>
-                     <div className="space-y-8 relative z-10">
-                        <div className="flex justify-between items-end border-b border-slate-800/50 pb-6">
-                           <div><p className="text-white font-bold text-lg">Total Kewajiban</p><p className="text-[10px] text-slate-600 font-black uppercase">Debts/Hutang</p></div>
-                           <span className="text-2xl font-black text-amber-500">Rp {stats.totalDebt.toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between items-end border-b border-slate-800/50 pb-6">
-                           <div><p className="text-white font-bold text-lg">Laba Bersih</p><p className="text-[10px] text-rose-500 font-black uppercase">Potongan Susut: Rp {stats.rupiahLoss.toLocaleString()}</p></div>
-                           <span className="text-2xl font-black text-emerald-400">Rp {stats.profit.toLocaleString()}</span>
-                        </div>
-                        <div className="pt-8 flex justify-between items-center text-indigo-400">
-                           <span className="font-black text-xs tracking-[0.3em] uppercase opacity-70">Ekuitas & Pasiva</span>
-                           <span className="text-4xl font-black tracking-tighter italic">Rp {(stats.totalDebt + stats.totalCapital + stats.profit).toLocaleString()}</span>
-                        </div>
-                     </div>
-                  </div>
-               </div>
-            )}
-          </>
-        )}
-      </main>
-    </div>
-  );
-};
+        <!-- PAGE BIAYA & MODAL -->
+        <div id="page-biaya" class="page-content hidden">
+            <div class="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div class="bg-white p-8 rounded-[2.5rem] border-t-8 border-rose-500 shadow-xl">
+                    <h3 class="font-black text-xl mb-6">Input Biaya Operasional</h3>
+                    <div class="space-y-4">
+                        <input id="in-exp-ket" type="text" placeholder="Keterangan (Gaji, Bensin, dll)" class="w-full p-4 border rounded-2xl font-bold">
+                        <input id="in-exp-nominal" type="number" placeholder="Nominal Rp" class="w-full p-4 border rounded-2xl font-black text-rose-600">
+                        <input id="in-exp-date" type="date" class="w-full p-4 border rounded-2xl font-bold">
+                        <button onclick="saveTx('BIAYA')" class="w-full py-4 bg-rose-600 text-white rounded-2xl font-black">CATAT BIAYA</button>
+                    </div>
+                </div>
+                <div class="bg-white p-8 rounded-[2.5rem] border-t-8 border-amber-500 shadow-xl">
+                    <h3 class="font-black text-xl mb-6">Manajemen Modal & Prive</h3>
+                    <div class="space-y-4">
+                        <select id="in-modal-tipe" class="w-full p-4 bg-slate-50 border rounded-2xl font-bold">
+                            <option value="MODAL">Setoran Modal (Kas Masuk)</option>
+                            <option value="PRIVE">Prive / Tarik Tunai (Kas Keluar)</option>
+                        </select>
+                        <input id="in-modal-nominal" type="number" placeholder="Nominal Rp" class="w-full p-4 border rounded-2xl font-black text-amber-600">
+                        <input id="in-modal-date" type="date" class="w-full p-4 border rounded-2xl font-bold">
+                        <button onclick="saveTx('CAPITAL')" class="w-full py-4 bg-amber-500 text-white rounded-2xl font-black">PROSES MODAL</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-export default App;
+        <!-- LAPORAN LABA RUGI -->
+        <div id="page-laba-rugi" class="page-content hidden">
+            <div class="max-w-4xl mx-auto bg-white p-8 lg:p-12 rounded-[3rem] shadow-xl border border-slate-200">
+                <div class="text-center mb-12 border-b-2 border-slate-100 pb-8">
+                    <h2 class="text-3xl font-black text-slate-900 uppercase">Laporan Laba / Rugi</h2>
+                    <p class="text-slate-400 font-bold" id="pl-period">Periode Berjalan 2026</p>
+                </div>
+                
+                <div class="space-y-8">
+                    <section>
+                        <h4 class="font-black text-emerald-600 border-b mb-4 uppercase text-xs tracking-widest">Pendapatan</h4>
+                        <div class="flex justify-between items-center py-2">
+                            <span class="font-medium">Hasil Klaim Penjualan TBS (PKS)</span>
+                            <span id="pl-jual" class="font-black">Rp 0</span>
+                        </div>
+                    </section>
 
+                    <section>
+                        <h4 class="font-black text-rose-600 border-b mb-4 uppercase text-xs tracking-widest">Beban Pokok Penjualan</h4>
+                        <div class="flex justify-between items-center py-2">
+                            <span class="font-medium">Pembelian TBS (RAM)</span>
+                            <span id="pl-beli" class="font-black text-rose-600">(Rp 0)</span>
+                        </div>
+                        <div class="flex justify-between items-center py-4 border-t-2 border-slate-900 mt-2">
+                            <span class="font-black text-lg">Laba Kotor</span>
+                            <span id="pl-laba-kotor" class="font-black text-lg">Rp 0</span>
+                        </div>
+                    </section>
+
+                    <section>
+                        <h4 class="font-black text-slate-400 border-b mb-4 uppercase text-xs tracking-widest">Beban Operasional</h4>
+                        <div id="pl-list-biaya" class="space-y-2"></div>
+                        <div class="flex justify-between items-center py-2 font-bold italic">
+                            <span>Total Beban Operasional</span>
+                            <span id="pl-total-biaya" class="text-rose-600">Rp 0</span>
+                        </div>
+                    </section>
+
+                    <section class="bg-slate-900 text-white p-6 lg:p-8 rounded-3xl mt-12 flex justify-between items-center">
+                        <div>
+                            <h3 class="text-xl lg:text-2xl font-black uppercase">Laba Bersih</h3>
+                        </div>
+                        <h2 id="pl-netto" class="text-3xl lg:text-4xl font-black text-emerald-400">Rp 0</h2>
+                    </section>
+                </div>
+            </div>
+        </div>
+
+        <!-- LAPORAN NERACA -->
+        <div id="page-neraca" class="page-content hidden">
+            <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div class="bg-white p-8 lg:p-10 rounded-[3rem] shadow-xl border border-slate-200">
+                    <h3 class="text-2xl font-black mb-8 text-emerald-700">Aktiva (Aset)</h3>
+                    <div class="space-y-6">
+                        <div>
+                            <p class="text-[10px] font-black text-slate-400 uppercase mb-2">Aset Lancar</p>
+                            <div class="flex justify-between py-2 border-b border-slate-50"><span>Kas & Bank</span><span id="bl-kas" class="font-bold">Rp 0</span></div>
+                            <div class="flex justify-between py-2 border-b border-slate-50"><span>Persediaan TBS (RAM)</span><span id="bl-stok" class="font-bold">Rp 0</span></div>
+                            <div class="flex justify-between py-2 border-b border-slate-50"><span>TBS dalam Perjalanan (OTW)</span><span id="bl-otw" class="font-bold">Rp 0</span></div>
+                            <div class="flex justify-between py-2 border-b border-slate-50"><span>Piutang PKS (Belum Cair)</span><span id="bl-piutang" class="font-bold">Rp 0</span></div>
+                        </div>
+                        <div class="pt-10 flex justify-between items-center border-t-4 border-emerald-500">
+                            <span class="text-xl font-black uppercase">Total Aktiva</span>
+                            <span id="bl-total-aktiva" class="text-2xl font-black text-emerald-600">Rp 0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-8 lg:p-10 rounded-[3rem] shadow-xl border border-slate-200">
+                    <h3 class="text-2xl font-black mb-8 text-blue-700">Pasiva (Kewajiban & Modal)</h3>
+                    <div class="space-y-6">
+                        <div>
+                            <p class="text-[10px] font-black text-slate-400 uppercase mb-2">Modal Pemilik</p>
+                            <div class="flex justify-between py-2 border-b border-slate-50"><span>Modal Awal / Disetor</span><span id="bl-modal-disetor" class="font-bold">Rp 0</span></div>
+                            <div class="flex justify-between py-2 border-b border-slate-50"><span>Laba Ditahan / Berjalan</span><span id="bl-laba-berjalan" class="font-bold">Rp 0</span></div>
+                            <div class="flex justify-between py-2 border-b border-slate-50 text-rose-500"><span>Prive (Penarikan)</span><span id="bl-prive" class="font-bold">(Rp 0)</span></div>
+                        </div>
+                        <div class="pt-10 flex justify-between items-center border-t-4 border-blue-500">
+                            <span class="text-xl font-black uppercase">Total Pasiva</span>
+                            <span id="bl-total-pasiva" class="text-2xl font-black text-blue-600">Rp 0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- LAPORAN PERUBAHAN MODAL -->
+        <div id="page-modal" class="page-content hidden">
+            <div class="max-w-4xl mx-auto bg-white p-8 lg:p-12 rounded-[3rem] shadow-xl">
+                 <div class="text-center mb-12">
+                    <h2 class="text-3xl font-black text-slate-900 uppercase">Laporan Perubahan Modal</h2>
+                    <p class="text-slate-400 font-bold">Periode Berakhir 2026</p>
+                </div>
+                <div class="space-y-4 max-w-2xl mx-auto">
+                    <div class="flex justify-between py-4 border-b">
+                        <span class="font-medium text-slate-500">Modal Awal Periode</span>
+                        <span id="cm-awal" class="font-black text-lg">Rp 0</span>
+                    </div>
+                    <div class="flex justify-between py-4 border-b">
+                        <span class="font-medium text-slate-500">Laba Bersih Tahun Berjalan</span>
+                        <span id="cm-laba" class="font-black text-lg text-emerald-600">+ Rp 0</span>
+                    </div>
+                    <div class="flex justify-between py-4 border-b">
+                        <span class="font-medium text-slate-500 text-rose-500">Pengambilan Pribadi (Prive)</span>
+                        <span id="cm-prive" class="font-black text-lg text-rose-500">- Rp 0</span>
+                    </div>
+                    <div class="flex justify-between py-8 mt-10 border-t-4 border-slate-900 bg-slate-50 px-6 rounded-2xl">
+                        <span class="text-xl font-black">MODAL AKHIR</span>
+                        <span id="cm-akhir" class="text-2xl font-black text-blue-600">Rp 0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        let db = JSON.parse(localStorage.getItem('palm_finance_db')) || { tx: [] };
+
+        const navTo = (id) => {
+            document.querySelectorAll('.page-content').forEach(p => p.classList.add('hidden'));
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('page-' + id).classList.remove('hidden');
+            document.getElementById('nav-' + id).classList.add('active');
+            renderAll();
+        };
+
+        const setToday = () => {
+            const now = new Date().toISOString().split('T')[0];
+            ['in-beli-date', 'in-jual-date', 'in-exp-date', 'in-modal-date'].forEach(i => {
+                const el = document.getElementById(i); if(el) el.value = now;
+            });
+        };
+
+        function calcBeli() {
+            const b = parseFloat(document.getElementById('in-beli-bruto').value) || 0;
+            const t = parseFloat(document.getElementById('in-beli-tara').value) || 0;
+            const p = parseFloat(document.getElementById('in-beli-pot').value) || 0;
+            const h = parseFloat(document.getElementById('in-beli-harga').value) || 0;
+            const kotor = b - t;
+            const potkg = Math.round(kotor * (p/100));
+            const netto = kotor - potkg;
+            const total = netto * h;
+            document.getElementById('res-beli-netto').innerText = netto.toLocaleString() + ' Kg';
+            document.getElementById('res-beli-potkg').innerText = potkg.toLocaleString() + ' Kg';
+            document.getElementById('res-beli-total').innerText = 'Rp ' + total.toLocaleString();
+            return { netto, total, kotor, h };
+        }
+
+        function calcJual() {
+            const b = parseFloat(document.getElementById('in-jual-bruto').value) || 0;
+            const t = parseFloat(document.getElementById('in-jual-tara').value) || 0;
+            const s = parseFloat(document.getElementById('in-jual-sortasi').value) || 0;
+            const h = parseFloat(document.getElementById('in-jual-harga').value) || 0;
+            const kotor = b - t;
+            const netto = kotor - Math.round(kotor * (s/100));
+            const total = netto * h;
+            document.getElementById('res-jual-netto').innerText = 'Netto PKS: ' + netto.toLocaleString() + ' Kg';
+            document.getElementById('res-jual-total').innerText = 'Rp ' + total.toLocaleString();
+            return { netto, total, kotor };
+        }
+
+        function saveTx(tipe) {
+            let data = { id: Date.now(), tipe, ts: Date.now() };
+            
+            if(tipe === 'BELI') {
+                const r = calcBeli();
+                data.nama = document.getElementById('in-beli-nama').value || 'Pemasok';
+                data.netto = r.netto; data.total = r.total; data.h = r.h;
+                data.ts = new Date(document.getElementById('in-beli-date').value).getTime();
+            } else if(tipe === 'JUAL') {
+                const r = calcJual();
+                data.refId = document.getElementById('in-jual-ref').value;
+                data.nama = "Klaim PKS DO " + data.refId;
+                data.netto = r.netto; data.total = r.total;
+                data.ts = new Date(document.getElementById('in-jual-date').value).getTime();
+                const ref = db.tx.find(x => x.id == data.refId);
+                if(ref) data.susut = ref.netto - r.kotor;
+            } else if(tipe === 'BIAYA') {
+                data.nama = document.getElementById('in-exp-ket').value;
+                data.total = parseFloat(document.getElementById('in-exp-nominal').value) || 0;
+                data.ts = new Date(document.getElementById('in-exp-date').value).getTime();
+            } else if(tipe === 'CAPITAL') {
+                data.tipeModal = document.getElementById('in-modal-tipe').value;
+                data.total = parseFloat(document.getElementById('in-modal-nominal').value) || 0;
+                data.nama = data.tipeModal === 'MODAL' ? 'Setoran Modal' : 'Prive';
+                data.ts = new Date(document.getElementById('in-modal-date').value).getTime();
+            }
+
+            db.tx.unshift(data);
+            localStorage.setItem('palm_finance_db', JSON.stringify(db));
+            renderAll(); setToday();
+            alert("Berhasil!");
+        }
+
+        function renderAll() {
+            let stok=0, otw=0, piutang=0, susut=0, beliRp=0, jualRp=0, biayaRp=0, kas=0, modalRp=0, priveRp=0;
+            const claimed = db.tx.filter(x => x.tipe === 'JUAL').map(x => x.refId);
+            
+            db.tx.forEach(t => {
+                if(t.tipe === 'BELI') {
+                    beliRp += t.total; kas -= t.total;
+                    if(!claimed.includes(t.id.toString())) otw += t.netto;
+                }
+                if(t.tipe === 'JUAL') {
+                    jualRp += t.total; piutang += t.total;
+                    if(t.susut) susut += t.susut;
+                }
+                if(t.tipe === 'BIAYA') { biayaRp += t.total; kas -= t.total; }
+                if(t.tipe === 'CAPITAL') {
+                    if(t.tipeModal === 'MODAL') { modalRp += t.total; kas += t.total; }
+                    else { priveRp += t.total; kas -= t.total; }
+                }
+            });
+
+            const labaBersih = jualRp - beliRp - biayaRp;
+            const estStokVal = (otw + stok) * 2000;
+
+            document.getElementById('dash-stok').innerText = stok.toLocaleString();
+            document.getElementById('dash-otw').innerText = otw.toLocaleString();
+            document.getElementById('dash-susut').innerText = susut.toLocaleString();
+            document.getElementById('dash-cash').innerText = 'Rp ' + kas.toLocaleString();
+            document.getElementById('dash-profit').innerText = 'Rp ' + labaBersih.toLocaleString();
+
+            document.getElementById('pl-jual').innerText = 'Rp ' + jualRp.toLocaleString();
+            document.getElementById('pl-beli').innerText = '(Rp ' + beliRp.toLocaleString() + ')';
+            document.getElementById('pl-laba-kotor').innerText = 'Rp ' + (jualRp - beliRp).toLocaleString();
+            document.getElementById('pl-total-biaya').innerText = 'Rp ' + biayaRp.toLocaleString();
+            document.getElementById('pl-netto').innerText = 'Rp ' + labaBersih.toLocaleString();
+            
+            const plList = document.getElementById('pl-list-biaya');
+            plList.innerHTML = '';
+            db.tx.filter(x => x.tipe === 'BIAYA').forEach(b => {
+                plList.insertAdjacentHTML('beforeend', `<div class="flex justify-between py-1 text-sm"><span>${b.nama}</span><span>Rp ${b.total.toLocaleString()}</span></div>`);
+            });
+
+            document.getElementById('bl-kas').innerText = 'Rp ' + kas.toLocaleString();
+            document.getElementById('bl-stok').innerText = 'Rp ' + (stok * 2000).toLocaleString();
+            document.getElementById('bl-otw').innerText = 'Rp ' + (otw * 2000).toLocaleString();
+            document.getElementById('bl-piutang').innerText = 'Rp ' + piutang.toLocaleString();
+            document.getElementById('bl-total-aktiva').innerText = 'Rp ' + (kas + estStokVal + piutang).toLocaleString();
+
+            document.getElementById('bl-modal-disetor').innerText = 'Rp ' + modalRp.toLocaleString();
+            document.getElementById('bl-laba-berjalan').innerText = 'Rp ' + labaBersih.toLocaleString();
+            document.getElementById('bl-prive').innerText = '(Rp ' + priveRp.toLocaleString() + ')';
+            document.getElementById('bl-total-pasiva').innerText = 'Rp ' + (modalRp + labaBersih - priveRp).toLocaleString();
+
+            document.getElementById('cm-awal').innerText = 'Rp ' + modalRp.toLocaleString();
+            document.getElementById('cm-laba').innerText = '+ Rp ' + labaBersih.toLocaleString();
+            document.getElementById('cm-prive').innerText = '- Rp ' + priveRp.toLocaleString();
+            document.getElementById('cm-akhir').innerText = 'Rp ' + (modalRp + labaBersih - priveRp).toLocaleString();
+
+            const sel = document.getElementById('in-jual-ref');
+            const curVal = sel.value;
+            sel.innerHTML = '<option value="">-- Pilih DO Belum Diklaim --</option>';
+            db.tx.filter(x => x.tipe === 'BELI' && !claimed.includes(x.id.toString())).forEach(x => {
+                sel.insertAdjacentHTML('beforeend', `<option value="${x.id}">DO-${x.id} | ${x.nama} (${x.netto}Kg)</option>`);
+            });
+            sel.value = curVal;
+
+            const logs = document.getElementById('recent-logs');
+            logs.innerHTML = '';
+            db.tx.slice(0, 5).forEach(x => {
+                logs.insertAdjacentHTML('beforeend', `
+                    <div class="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
+                        <div><p class="font-black text-sm">${x.nama}</p><p class="text-[10px] text-slate-400 uppercase font-bold">${x.tipe}</p></div>
+                        <div class="text-right"><p class="font-black text-sm ${x.tipe==='BELI'||x.tipe==='BIAYA'?'text-rose-600':'text-emerald-600'}">Rp ${x.total.toLocaleString()}</p><p class="text-[10px] text-slate-400 font-bold">${new Date(x.ts).toLocaleDateString()}</p></div>
+                    </div>
+                `);
+            });
+            renderCharts();
+        }
+
+        let chartBeli;
+        function renderCharts() {
+            const ctx = document.getElementById('chartBeli');
+            const last7Days = [...Array(7)].map((_, i) => {
+                const d = new Date(); d.setDate(d.getDate() - i);
+                return d.toISOString().split('T')[0];
+            }).reverse();
+            const data = last7Days.map(day => db.tx.filter(x => x.tipe === 'BELI' && new Date(x.ts).toISOString().split('T')[0] === day).reduce((a, b) => a + b.netto, 0));
+            if(chartBeli) chartBeli.destroy();
+            chartBeli = new Chart(ctx, {
+                type: 'bar',
+                data: { labels: ['H-6','H-5','H-4','H-3','H-2','H-1','Hari Ini'], datasets: [{ label: 'Kg', data: data, backgroundColor: '#10b981', borderRadius: 10 }] },
+                options: { maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+        }
+
+        // --- NEW: EXCEL EXPORT FEATURE ---
+        function exportFullReport() {
+            const wb = XLSX.utils.book_new();
+            
+            // 1. Sheet Laba Rugi
+            let plData = [
+                ["LAPORAN LABA RUGI"],
+                ["Periode:", new Date().toLocaleDateString()],
+                [],
+                ["Keterangan", "Nominal"],
+                ["Pendapatan Klaim PKS", parseFloat(document.getElementById('pl-jual').innerText.replace(/[^0-9]/g, ""))],
+                ["Beban Pembelian TBS", -parseFloat(document.getElementById('pl-beli').innerText.replace(/[^0-9]/g, ""))],
+                ["LABA KOTOR", parseFloat(document.getElementById('pl-laba-kotor').innerText.replace(/[^0-9]/g, ""))],
+                ["Total Biaya Operasional", -parseFloat(document.getElementById('pl-total-biaya').innerText.replace(/[^0-9]/g, ""))],
+                ["LABA BERSIH", parseFloat(document.getElementById('pl-netto').innerText.replace(/[^0-9]/g, ""))]
+            ];
+            const wsPL = XLSX.utils.aoa_to_sheet(plData);
+            XLSX.utils.book_append_sheet(wb, wsPL, "Laba Rugi");
+
+            // 2. Sheet Neraca
+            let blData = [
+                ["LAPORAN NERACA"],
+                ["AKTIVA", "", "PASIVA", ""],
+                ["Kas & Bank", parseFloat(document.getElementById('bl-kas').innerText.replace(/[^0-9]/g, "")), "Modal Disetor", parseFloat(document.getElementById('bl-modal-disetor').innerText.replace(/[^0-9]/g, ""))],
+                ["Stok RAM", parseFloat(document.getElementById('bl-stok').innerText.replace(/[^0-9]/g, "")), "Laba Berjalan", parseFloat(document.getElementById('bl-laba-berjalan').innerText.replace(/[^0-9]/g, ""))],
+                ["OTW PKS", parseFloat(document.getElementById('bl-otw').innerText.replace(/[^0-9]/g, "")), "Prive", -parseFloat(document.getElementById('bl-prive').innerText.replace(/[^0-9]/g, ""))],
+                ["Piutang PKS", parseFloat(document.getElementById('bl-piutang').innerText.replace(/[^0-9]/g, ""))],
+                ["TOTAL AKTIVA", parseFloat(document.getElementById('bl-total-aktiva').innerText.replace(/[^0-9]/g, "")), "TOTAL PASIVA", parseFloat(document.getElementById('bl-total-pasiva').innerText.replace(/[^0-9]/g, ""))]
+            ];
+            const wsBL = XLSX.utils.aoa_to_sheet(blData);
+            XLSX.utils.book_append_sheet(wb, wsBL, "Neraca");
+
+            // 3. Sheet Perubahan Modal
+            let cmData = [
+                ["LAPORAN PERUBAHAN MODAL"],
+                ["Keterangan", "Jumlah"],
+                ["Modal Awal", parseFloat(document.getElementById('cm-awal').innerText.replace(/[^0-9]/g, ""))],
+                ["Laba Bersih", parseFloat(document.getElementById('cm-laba').innerText.replace(/[^0-9]/g, ""))],
+                ["Prive", -parseFloat(document.getElementById('cm-prive').innerText.replace(/[^0-9]/g, ""))],
+                ["MODAL AKHIR", parseFloat(document.getElementById('cm-akhir').innerText.replace(/[^0-9]/g, ""))]
+            ];
+            const wsCM = XLSX.utils.aoa_to_sheet(cmData);
+            XLSX.utils.book_append_sheet(wb, wsCM, "Modal");
+
+            // 4. Sheet Jurnal Transaksi Detail
+            const journal = db.tx.map(x => ({
+                Tanggal: new Date(x.ts).toLocaleDateString(),
+                Tipe: x.tipe,
+                Keterangan: x.nama,
+                Netto: x.netto || 0,
+                Harga: x.h || 0,
+                Total: x.total
+            }));
+            const wsJournal = XLSX.utils.json_to_sheet(journal);
+            XLSX.utils.book_append_sheet(wb, wsJournal, "Detail Transaksi");
+
+            XLSX.writeFile(wb, `PalmCore_Full_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
+        }
+
+        window.onload = () => { setToday(); renderAll(); };
+    </script>
+</body>
+</html>
